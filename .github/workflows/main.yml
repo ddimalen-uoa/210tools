@@ -1,0 +1,58 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Finish an active deployment before starting the next one.
+concurrency:
+  group: 210tools-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Register this runner on the production Ubuntu VM.
+    # Docker Engine and Docker Compose v2 must be available to the runner user.
+    runs-on: [self-hosted, Linux, X64]
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      COMPOSE_PROJECT_NAME: 210tools-production
+      WEB_IMAGE: 210tools-web:${{ github.sha }}
+      # Optional repository variables; defaults serve HTTP on port 80.
+      HTTP_PORT: ${{ vars.HTTP_PORT || '80' }}
+      HTTP_BIND_ADDRESS: ${{ vars.HTTP_BIND_ADDRESS || '0.0.0.0' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate Docker and production configuration
+        run: |
+          docker info > /dev/null
+          docker compose version
+          test -s web/index.html
+          docker compose -f compose.production.yaml config --quiet
+
+      # web/ already contains the built website. Only package it into the image.
+      # The image stays on this VM; no registry or registry credentials are needed.
+      - name: Package website in Docker image
+        run: docker build --pull --tag "$WEB_IMAGE" .
+
+      - name: Deploy production service
+        run: |
+          docker compose -f compose.production.yaml up -d --no-build --pull never --wait --wait-timeout 120
+          docker compose -f compose.production.yaml ps
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f compose.production.yaml logs --tail 100 nginx
