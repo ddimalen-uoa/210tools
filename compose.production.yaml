@@ -1,0 +1,18 @@
+# Standalone production deployment. Set WEB_IMAGE to the image published by CI.
+services:
+  nginx:
+    image: ${WEB_IMAGE:?Set WEB_IMAGE to a versioned image such as ghcr.io/owner/210tools:commit-sha}
+    ports:
+      - "${HTTP_BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-80}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
